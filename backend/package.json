@@ -1,0 +1,37 @@
+{
+  "name": "admind-backend",
+  "version": "0.1.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "db:migrate": "npx prisma migrate dev",
+    "db:generate": "npx prisma generate",
+    "db:studio": "npx prisma studio"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.3.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "axios": "^1.7.2",
+    "ioredis": "^5.4.1",
+    "bullmq": "^5.8.3",
+    "node-cron": "^3.0.3",
+    "openai": "^4.52.7",
+    "@anthropic-ai/sdk": "^0.24.3",
+    "google-ads-api": "^16.0.0",
+    "facebook-nodejs-business-sdk": "^20.0.3",
+    "stripe": "^16.1.0",
+    "@prisma/client": "^5.16.1",
+    "zod": "^3.23.8",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.16.1",
+    "nodemon": "^3.1.4"
+  }
+}

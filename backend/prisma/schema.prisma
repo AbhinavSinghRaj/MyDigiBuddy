@@ -1,0 +1,245 @@
+// prisma/schema.prisma
+// Single source of truth for the database schema.
+// Run `npx prisma migrate dev` after changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users & Tenants ────────────────────────────────────────────────────────
+
+model User {
+  id               String  @id @default(cuid())
+  email            String  @unique
+  name             String?
+  passwordHash     String? // null when using OAuth-only sign-in
+  role             String  @default("user") // "user" | "admin"
+  stripeCustomerId String?
+
+  tenants       TenantMember[]
+  subscriptions Subscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A Tenant represents a business. One user can own multiple tenants,
+// and future multi-member support is modelled via TenantMember (out-of-scope for MVP).
+model Tenant {
+  id      String @id @default(cuid())
+  name    String
+  ownerId String
+
+  members           TenantMember[]
+  subscriptions     Subscription[]
+  connectedAccounts ConnectedAccount[]
+  googleCampaigns   GoogleCampaign[]
+  metaCampaigns     MetaCampaign[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Join table — kept minimal for MVP; roles/permissions are out-of-scope.
+model TenantMember {
+  id       String @id @default(cuid())
+  userId   String
+  tenantId String
+  role     String @default("owner") // only "owner" used in MVP
+
+  user   User   @relation(fields: [userId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([userId, tenantId])
+}
+
+// ─── Plans & Subscriptions ──────────────────────────────────────────────────
+
+model Plan {
+  id                   String @id @default(cuid())
+  name                 String @unique // "starter" | "pro"
+  monthlyPriceINR      Int
+  maxGoogleAdsAccounts Int    @default(1)
+  maxMetaAdsAccounts   Int    @default(1)
+  maxAiCallsPerMonth   Int    @default(50)
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                   String    @id @default(cuid())
+  userId               String
+  tenantId             String
+  planId               String
+  stripeSubscriptionId String?
+  stripeCustomerId     String?
+  status               String    @default("active") // "active" | "cancelled" | "past_due"
+  currentPeriodEnd     DateTime?
+
+  user   User   @relation(fields: [userId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Connected Accounts ──────────────────────────────────────────────────────
+// Each ConnectedAccount stores OAuth tokens for one ad platform account.
+// Tokens are stored in plain text here — in production, encrypt at rest.
+
+model ConnectedAccount {
+  id           String    @id @default(cuid())
+  tenantId     String
+  provider     String    // "google_ads" | "meta_ads"
+  accountId    String    // External account ID from the ad platform
+  accountName  String?
+  refreshToken String?
+  accessToken  String?
+  expiresAt    DateTime?
+  status       String    @default("connected") // "connected" | "disconnected" | "error"
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  googleCampaigns GoogleCampaign[]
+  metaCampaigns   MetaCampaign[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, provider, accountId])
+}
+
+// ─── Google Ads Entities ─────────────────────────────────────────────────────
+
+model GoogleCampaign {
+  id                 String  @id @default(cuid())
+  tenantId           String
+  connectedAccountId String
+  externalCampaignId String
+  name               String
+  status             String  // "ENABLED" | "PAUSED" | "REMOVED"
+  campaignType       String? // "SEARCH" | "PERFORMANCE_MAX" | "DISPLAY"
+  budget             Float?
+  dailyBudget        Float?
+  currency           String  @default("INR")
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id])
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id])
+  adGroups         GoogleAdGroup[]
+
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([tenantId, externalCampaignId])
+}
+
+model GoogleAdGroup {
+  id                 String @id @default(cuid())
+  googleCampaignId   String
+  externalAdGroupId  String
+  name               String
+  status             String // "ENABLED" | "PAUSED"
+
+  googleCampaign GoogleCampaign @relation(fields: [googleCampaignId], references: [id], onDelete: Cascade)
+  ads            GoogleAd[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GoogleAd {
+  id              String  @id @default(cuid())
+  googleAdGroupId String
+  externalAdId    String
+  headline1       String?
+  headline2       String?
+  headline3       String?
+  description1    String?
+  description2    String?
+  finalUrl        String?
+  status          String  // "ENABLED" | "PAUSED"
+
+  googleAdGroup GoogleAdGroup @relation(fields: [googleAdGroupId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Meta Ads Entities ───────────────────────────────────────────────────────
+
+model MetaCampaign {
+  id                 String @id @default(cuid())
+  tenantId           String
+  connectedAccountId String
+  externalCampaignId String
+  name               String
+  status             String // "ACTIVE" | "PAUSED" | "ARCHIVED"
+  objective          String // e.g. "LEAD_GENERATION", "CONVERSIONS"
+  currency           String @default("INR")
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id])
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id])
+  adSets           MetaAdSet[]
+
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([tenantId, externalCampaignId])
+}
+
+model MetaAdSet {
+  id               String @id @default(cuid())
+  metaCampaignId   String
+  externalAdSetId  String
+  name             String
+  status           String
+  targetAudience   Json   // Raw audience JSON from Meta API
+  dailyBudget      Float?
+
+  metaCampaign MetaCampaign @relation(fields: [metaCampaignId], references: [id], onDelete: Cascade)
+  ads          MetaAd[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MetaAd {
+  id           String  @id @default(cuid())
+  metaAdSetId  String
+  externalAdId String
+  primaryText  String?
+  headline     String?
+  description  String?
+  imageUrl     String?
+  callToAction String?
+  status       String
+
+  metaAdSet MetaAdSet @relation(fields: [metaAdSetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── AI Usage Tracking ───────────────────────────────────────────────────────
+// Tracks LLM calls per tenant for usage-based rate limiting.
+
+model AiUsageLog {
+  id         String @id @default(cuid())
+  tenantId   String
+  endpoint   String // "optimize_google" | "optimize_meta" | "ad_copy"
+  promptHash String // SHA-256 of the prompt — used for cache lookups
+  response   String // Cached response text
+  tokensUsed Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([promptHash])
+}
